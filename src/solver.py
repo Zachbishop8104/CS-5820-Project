@@ -2,58 +2,61 @@ import heapq
 
 def solve_cleaning_a_star(start, floorMatrix, dirt_set):
     """
-    Solves the cleaning problem using A* search with forward checking.
+    A* Solver that finds the minimum number of moves to:
+    1. Clean all dirt cells
+    2. Return to the starting position (0,0)
 
-    Goal: Clean all dirty cells using the minimum number of moves.
+    This is a CSP:
+    - Variables: dirt cells
+    - Constraints: all dirt must be cleaned AND the final position must be the start
+    - State: (agent_position, cleaned_dirt_set)
 
-    CSP Model:
-    - Variables: All cells that initially contain dirt
-    - Domain: Possible sequences of moves leading to each dirt cell
-    - Constraints:
-        1. All dirt cells must be visited and cleaned
-        2. The agent may only move to valid (non-wall) neighbors
-
-    A* with forward checking:
-    - The agent tracks what dirt has been cleaned
-    - Memoization prevents revisiting the same state with a higher cost
-    - Heuristic guides search based on proximity to remaining dirt
+    Implements forward checking and constraint propagation by:
+    - Memoizing visited states with cost (branch & bound)
+    - Heuristic: estimated cost to complete cleaning + return to start
     """
 
     rows, cols = len(floorMatrix), len(floorMatrix[0])
     total_dirt = len(dirt_set)
-    start_state = (start, frozenset())  # current position, cleaned dirt set
-    g_start = 0  # cost so far
+    start_state = (start, frozenset())  # (position, cleaned dirt set)
+    g_start = 0
 
-    # Heuristic: 
-    # Estimate remaining cost by:
-    # - Number of dirt cells left to clean
-    # - Minimum Manhattan distance to the nearest dirty cell
     def heuristic(state):
+        """
+        Heuristic estimates:
+        - Remaining cleaning steps
+        - Distance to nearest dirty cell (if any remain)
+        - If all clean, distance to return to start
+        """
         current, cleaned = state
         remaining = dirt_set - set(cleaned)
+
         if not remaining:
-            return 0
-        min_dist = min(abs(current[0]-d[0]) + abs(current[1]-d[1]) for d in remaining)
+            # All cleaned: estimate return to start
+            return abs(current[0] - start[0]) + abs(current[1] - start[1])
+
+        min_dist = min(abs(current[0] - d[0]) + abs(current[1] - d[1]) for d in remaining)
         return len(remaining) + min_dist
 
     f_start = g_start + heuristic(start_state)
     pq = [(f_start, g_start, start_state, [("move", start)])]
-    memo = {}  # used for forward checking (pruning)
+    memo = {}
+    best_solution = None
+    best_cost = float("inf")
 
     while pq:
         f, g, state, path = heapq.heappop(pq)
         current, cleaned = state
 
-        # Check if goal state (all dirt cleaned)
-        if len(cleaned) == total_dirt:
+        # GOAL: All dirt cleaned AND returned to start
+        if len(cleaned) == total_dirt and current == start:
             return path, g
 
-        # Constraint propagation: prune if visited with lower cost
         if state in memo and memo[state] <= g:
             continue
         memo[state] = g
 
-        # Cleaning action (cost = 1)
+        # Clean action
         if current in dirt_set and current not in cleaned:
             new_cleaned = frozenset(set(cleaned) | {current})
             heapq.heappush(pq, (
@@ -63,14 +66,15 @@ def solve_cleaning_a_star(start, floorMatrix, dirt_set):
                 path + [("clean", current)]
             ))
 
-        # Movement actions (cardinal directions)
+        # Move action
         for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
             nx, ny = current[0] + dx, current[1] + dy
             if 0 <= nx < rows and 0 <= ny < cols and floorMatrix[nx][ny] != "#":
+                new_state = ((nx, ny), cleaned)
                 heapq.heappush(pq, (
-                    g + 1 + heuristic(((nx, ny), cleaned)),
+                    g + 1 + heuristic(new_state),
                     g + 1,
-                    ((nx, ny), cleaned),
+                    new_state,
                     path + [("move", (nx, ny))]
                 ))
 
